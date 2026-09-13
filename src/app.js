@@ -1,0 +1,28 @@
+const express = require('express');
+const tenantMiddleware = require('./middleware/tenant');
+const authMiddleware = require('./middleware/auth');
+const errorHandler = require('./middleware/errorHandler');
+const requestLogger = require('./middleware/requestLogger');
+const { authLimiter, generalLimiter } = require('./middleware/rateLimiter');
+
+const authRoutes = require('./modules/auth/auth.routes');
+const organizationRoutes = require('./modules/organizations/organization.routes');
+const projectRoutes = require('./modules/projects/project.routes');
+const taskRoutes = require('./modules/tasks/task.routes');
+
+const app = express();
+
+app.use(express.json());
+app.use(requestLogger);
+app.use(generalLimiter);
+
+app.get('/health', (req, res) => res.json({ success: true, status: 'ok' }));
+
+app.use('/organizations', organizationRoutes);
+app.use('/auth', authLimiter, authRoutes);
+app.use('/projects', tenantMiddleware, authMiddleware, projectRoutes);
+app.use('/tasks', tenantMiddleware, authMiddleware, taskRoutes);
+
+app.use(errorHandler);
+
+module.exports = app;

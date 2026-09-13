@@ -1,0 +1,32 @@
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: multitenant-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: multitenant
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: multitenant-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: multitenant-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  postgres_data:
