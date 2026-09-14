@@ -1,4 +1,7 @@
 require('dotenv').config();
+const { initSentry } = require('./config/sentry');
+initSentry();
+
 const app = require('./app');
 const { connectRabbitMQ } = require('./config/rabbitmq');
 
