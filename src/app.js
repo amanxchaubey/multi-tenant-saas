@@ -16,6 +16,14 @@ app.use(express.json());
 app.use(requestLogger);
 app.use(generalLimiter);
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Multi-tenant SaaS backend — API only, no frontend UI',
+    docs: 'See README for full endpoint list and setup instructions',
+    health: '/health',
+    repo: 'https://github.com/<amanxchaubey>/multi-tenant-saas',
+  });
+});
 app.get('/health', (req, res) => res.json({ success: true, status: 'ok' }));
 
 app.use('/organizations', organizationRoutes);
