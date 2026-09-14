@@ -1,12 +1,15 @@
-const crypto = require('crypto');
-const { sendPasswordResetEmail } = require('../../lib/email');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { query, queryAsAdmin, withTenant } = require('../../config/db');
 const AppError = require('../../lib/AppError');
 const { generateRefreshToken, hashToken } = require('../../lib/tokens');
+const { sendPasswordResetEmail, sendVerificationEmail } = require('../../lib/email');
+const logger = require('../../config/logger');
 
 const REFRESH_TOKEN_TTL_DAYS = 7;
+const RESET_TOKEN_TTL_MINUTES = 30;
+const VERIFICATION_TOKEN_TTL_HOURS = 24;
 
 function signIdentityToken(user) {
   return jwt.sign({ sub: user.id, type: 'identity' }, process.env.JWT_ACCESS_SECRET, {
@@ -48,6 +51,24 @@ async function signup({ name, email, password }) {
     [name, email, passwordHash],
   );
   const user = rows[0];
+
+  // Fire the verification email, but don't let a delivery failure block
+  // signup itself — the account should still exist even if the email
+  // fails to send, and they can request a new one via resendVerificationEmail.
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
+
+  await query(
+    'INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+    [user.id, tokenHash, expiresAt],
+  );
+
+  try {
+    await sendVerificationEmail(email, rawToken);
+  } catch (err) {
+    logger.warn({ err: err.message, userId: user.id }, 'Signup succeeded but verification email failed to send');
+  }
 
   return { user, identityToken: signIdentityToken(user) };
 }
@@ -95,17 +116,6 @@ async function selectOrganization(userId, orgId) {
   return { accessToken, refreshToken, role: membership.role };
 }
 
-/**
- * Exchanges a valid refresh token for a new access token AND a new
- * refresh token (rotation) — the old refresh token is immediately
- * revoked, so it can never be used again, even by its legitimate owner.
- *
- * Reuse detection: if someone presents a refresh token that's already
- * been revoked, that's a strong signal the token was stolen and the
- * legitimate rotation already happened once — so we revoke EVERY refresh
- * token this user has, forcing them to log in again everywhere. This is
- * the standard "refresh token theft detection" pattern.
- */
 async function refreshAccessToken(rawToken) {
   const tokenHash = hashToken(rawToken);
 
@@ -117,7 +127,6 @@ async function refreshAccessToken(rawToken) {
   }
 
   if (record.revoked_at) {
-    // Reuse of an already-rotated token — possible theft. Revoke everything.
     await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [
       record.user_id,
     ]);
@@ -170,15 +179,10 @@ async function logout(rawToken) {
   ]);
 }
 
-const RESET_TOKEN_TTL_MINUTES = 30;
-
 async function requestPasswordReset(email) {
   const { rows } = await query('SELECT id FROM users WHERE email = $1', [email]);
   const user = rows[0];
 
-  // Deliberately don't reveal whether the email exists — always respond
-  // success either way, so this endpoint can't be used to check which
-  // emails are registered (a common, real security consideration).
   if (!user) return;
 
   const rawToken = crypto.randomBytes(32).toString('hex');
@@ -211,11 +215,41 @@ async function resetPassword(rawToken, newPassword) {
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, record.user_id]);
   await query('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1', [record.id]);
 
-  // Revoke every refresh token for this user too — if their password was
-  // compromised, any existing sessions should not survive the reset.
   await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [
     record.user_id,
   ]);
+}
+
+async function verifyEmail(rawToken) {
+  const tokenHash = hashToken(rawToken);
+
+  const { rows } = await query('SELECT * FROM email_verification_tokens WHERE token_hash = $1', [tokenHash]);
+  const record = rows[0];
+
+  if (!record) throw new AppError('Invalid or expired verification token', 400);
+  if (record.used_at) throw new AppError('This verification token has already been used', 400);
+  if (new Date(record.expires_at) < new Date()) throw new AppError('This verification token has expired', 400);
+
+  await query('UPDATE users SET email_verified = true WHERE id = $1', [record.user_id]);
+  await query('UPDATE email_verification_tokens SET used_at = NOW() WHERE id = $1', [record.id]);
+}
+
+async function resendVerificationEmail(email) {
+  const { rows } = await query('SELECT id, email_verified FROM users WHERE email = $1', [email]);
+  const user = rows[0];
+
+  if (!user || user.email_verified) return;
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
+
+  await query(
+    'INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+    [user.id, tokenHash, expiresAt],
+  );
+
+  await sendVerificationEmail(email, rawToken);
 }
 
 module.exports = {
@@ -226,4 +260,6 @@ module.exports = {
   logout,
   requestPasswordReset,
   resetPassword,
+  verifyEmail,
+  resendVerificationEmail,
 };

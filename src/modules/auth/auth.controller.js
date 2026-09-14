@@ -64,8 +64,6 @@ async function forgotPassword(req, res, next) {
     if (!email) return res.status(400).json({ success: false, message: 'email is required' });
 
     await authService.requestPasswordReset(email);
-
-    // Always the same response, whether or not the email exists.
     res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
   } catch (err) {
     next(err);
@@ -86,4 +84,41 @@ async function resetPassword(req, res, next) {
   }
 }
 
-module.exports = { signup, login, selectOrganization, refresh, logout, forgotPassword, resetPassword };
+async function verifyEmail(req, res, next) {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ success: false, message: 'token is required' });
+
+    await authService.verifyEmail(token);
+    res.json({ success: true, message: 'Email verified successfully.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function resendVerification(req, res, next) {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'email is required' });
+
+    await authService.resendVerificationEmail(email);
+    res.json({
+      success: true,
+      message: 'If that email exists and is unverified, a new verification email has been sent.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  signup,
+  login,
+  selectOrganization,
+  refresh,
+  logout,
+  forgotPassword,
+  resetPassword,
+  verifyEmail,
+  resendVerification,
+};
