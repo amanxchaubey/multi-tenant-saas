@@ -58,4 +58,32 @@ async function logout(req, res, next) {
   }
 }
 
-module.exports = { signup, login, selectOrganization, refresh, logout };
+async function forgotPassword(req, res, next) {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'email is required' });
+
+    await authService.requestPasswordReset(email);
+
+    // Always the same response, whether or not the email exists.
+    res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function resetPassword(req, res, next) {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ success: false, message: 'token and newPassword are required' });
+    }
+
+    await authService.resetPassword(token, newPassword);
+    res.json({ success: true, message: 'Password has been reset. Please log in again.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { signup, login, selectOrganization, refresh, logout, forgotPassword, resetPassword };

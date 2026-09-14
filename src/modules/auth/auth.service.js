@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+const { sendPasswordResetEmail } = require('../../lib/email');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query, queryAsAdmin, withTenant } = require('../../config/db');
@@ -168,4 +170,60 @@ async function logout(rawToken) {
   ]);
 }
 
-module.exports = { signup, login, selectOrganization, refreshAccessToken, logout };
+const RESET_TOKEN_TTL_MINUTES = 30;
+
+async function requestPasswordReset(email) {
+  const { rows } = await query('SELECT id FROM users WHERE email = $1', [email]);
+  const user = rows[0];
+
+  // Deliberately don't reveal whether the email exists — always respond
+  // success either way, so this endpoint can't be used to check which
+  // emails are registered (a common, real security consideration).
+  if (!user) return;
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+  await query(
+    'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+    [user.id, tokenHash, expiresAt],
+  );
+
+  await sendPasswordResetEmail(email, rawToken);
+}
+
+async function resetPassword(rawToken, newPassword) {
+  const tokenHash = hashToken(rawToken);
+
+  const { rows } = await query(
+    'SELECT * FROM password_reset_tokens WHERE token_hash = $1',
+    [tokenHash],
+  );
+  const record = rows[0];
+
+  if (!record) throw new AppError('Invalid or expired reset token', 400);
+  if (record.used_at) throw new AppError('This reset token has already been used', 400);
+  if (new Date(record.expires_at) < new Date()) throw new AppError('This reset token has expired', 400);
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, record.user_id]);
+  await query('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1', [record.id]);
+
+  // Revoke every refresh token for this user too — if their password was
+  // compromised, any existing sessions should not survive the reset.
+  await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [
+    record.user_id,
+  ]);
+}
+
+module.exports = {
+  signup,
+  login,
+  selectOrganization,
+  refreshAccessToken,
+  logout,
+  requestPasswordReset,
+  resetPassword,
+};
