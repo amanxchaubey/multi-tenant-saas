@@ -1,14 +1,15 @@
 const { Pool } = require('pg');
 
+const useSSL = process.env.DATABASE_URL?.includes('sslmode=require');
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: useSSL ? { rejectUnauthorized: false } : false,
 });
 
-// Separate pool using a BYPASSRLS role, for the narrow set of legitimate
-// cross-tenant operations (e.g. "list every org this user belongs to").
-// Never use this for regular tenant-scoped request handling.
 const adminPool = new Pool({
   connectionString: process.env.ADMIN_DATABASE_URL,
+  ssl: useSSL ? { rejectUnauthorized: false } : false,
 });
 
 pool.on('error', (err) => {
@@ -45,4 +46,5 @@ async function withTenant(orgId, callback) {
     client.release();
   }
 }
+
 module.exports = { pool, adminPool, query, queryAsAdmin, withTenant };

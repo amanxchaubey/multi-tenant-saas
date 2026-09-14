@@ -1,5 +1,5 @@
 const { query } = require('../config/db');
-const redis = require('../config/redis');
+const { redis, isRedisAvailable } = require('../config/redis');
 
 async function tenantMiddleware(req, res, next) {
   try {
@@ -11,14 +11,24 @@ async function tenantMiddleware(req, res, next) {
     const cacheKey = `org:slug:${slug}`;
     let org = null;
 
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      org = JSON.parse(cached);
-    } else {
+    // Cache is a pure optimization — if Redis is down or errors, just
+    // skip straight to the database instead of failing the request.
+    if (isRedisAvailable()) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) org = JSON.parse(cached);
+      } catch {
+        org = null; // fall through to the database below
+      }
+    }
+
+    if (!org) {
       const { rows } = await query('SELECT id, slug, name FROM organizations WHERE slug = $1', [slug]);
       if (rows[0]) {
         org = rows[0];
-        await redis.set(cacheKey, JSON.stringify(org), 'EX', 60);
+        if (isRedisAvailable()) {
+          redis.set(cacheKey, JSON.stringify(org), 'EX', 60).catch(() => {});
+        }
       }
     }
 
