@@ -14,8 +14,17 @@ async function create(orgId, { name, description, createdBy }) {
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [orgId, name, description || null, createdBy],
     );
+
+    await client.query(
+      `INSERT INTO audit_logs (organization_id, user_id, action, resource_type, resource_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [orgId, createdBy, 'project.created', 'project', rows[0].id],
+    );
+
     return rows[0];
   });
 }
+
+module.exports = { findAll, create };
 
 module.exports = { findAll, create };

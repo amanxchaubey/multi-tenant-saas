@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: multitenant_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up database schema and roles
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d multitenant_ci -f database/migrations/001_initial.sql
+          psql -h localhost -U postgres -d multitenant_ci -f database/migrations/002_tasks_and_rls.sql
+          psql -h localhost -U postgres -d multitenant_ci -f database/migrations/003_refresh_tokens.sql
+          psql -h localhost -U postgres -d multitenant_ci -f database/migrations/004_password_reset.sql
+          psql -h localhost -U postgres -d multitenant_ci -f database/migrations/005_email_verification.sql
+          psql -h localhost -U postgres -d multitenant_ci -c "
+            CREATE ROLE app_user WITH LOGIN PASSWORD 'ci_password';
+            GRANT USAGE ON SCHEMA public TO app_user;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
+            CREATE ROLE app_admin WITH LOGIN PASSWORD 'ci_password' BYPASSRLS;
+            GRANT USAGE ON SCHEMA public TO app_admin;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_admin;
+          "
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://app_user:ci_password@localhost:5432/multitenant_ci
+          ADMIN_DATABASE_URL: postgresql://app_admin:ci_password@localhost:5432/multitenant_ci
+          JWT_ACCESS_SECRET: ci_test_secret
+          JWT_REFRESH_SECRET: ci_test_secret_refresh
+        run: npm test
