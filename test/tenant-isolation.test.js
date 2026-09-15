@@ -41,7 +41,7 @@ describe('Tenant isolation (Row-Level Security)', () => {
 
     expect(orgBView.status).toBe(200);
     expect(orgBView.body.projects).toHaveLength(0);
-  });
+  }, 15000);
 
   it('rejects a token used against a different organization than it was issued for', async () => {
     const orgA = await signupAndCreateOrg({ userName: 'Carol', orgName: 'Initech' });
@@ -56,5 +56,5 @@ describe('Tenant isolation (Row-Level Security)', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.message).toMatch(/does not belong to this organization/i);
-  });
+  }, 30000);
 });

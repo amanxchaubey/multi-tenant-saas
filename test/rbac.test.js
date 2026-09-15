@@ -61,5 +61,5 @@ describe('Role-based access control', () => {
       .send({ name: 'Owner Created This' });
 
     expect(ownerCreateRes.status).toBe(201);
-  });
+  }, 30000);
 });

@@ -64,11 +64,11 @@ async function signup({ name, email, password }) {
     [user.id, tokenHash, expiresAt],
   );
 
-  try {
-    await sendVerificationEmail(email, rawToken);
-  } catch (err) {
-    logger.warn({ err: err.message, userId: user.id }, 'Signup succeeded but verification email failed to send');
-  }
+  // Fire-and-forget: don't make the signup response wait on email
+// delivery. Any failure is just logged, never affects the response.
+sendVerificationEmail(email, rawToken).catch((err) => {
+  logger.warn({ err: err.message, userId: user.id }, 'Signup succeeded but verification email failed to send');
+});
 
   return { user, identityToken: signIdentityToken(user) };
 }

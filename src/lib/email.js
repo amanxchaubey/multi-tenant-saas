@@ -1,9 +1,14 @@
 const { Resend } = require('resend');
 const logger = require('../config/logger');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 async function sendPasswordResetEmail(to, resetToken) {
+  if (!resend) {
+    logger.warn({ to }, 'RESEND_API_KEY not set — skipping password reset email (dev/CI mode)');
+    return null;
+  }
+
   const resetUrl = `${process.env.FRONTEND_RESET_URL}?token=${resetToken}`;
 
   const { data, error } = await resend.emails.send({
@@ -29,6 +34,11 @@ async function sendPasswordResetEmail(to, resetToken) {
 }
 
 async function sendVerificationEmail(to, verificationToken) {
+  if (!resend) {
+    logger.warn({ to }, 'RESEND_API_KEY not set — skipping verification email (dev/CI mode)');
+    return null;
+  }
+
   const { data, error } = await resend.emails.send({
     from: process.env.RESEND_FROM_EMAIL,
     to,
