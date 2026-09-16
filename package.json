@@ -27,7 +27,8 @@
     "pg": "^8.16.3",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
-    "resend": "^6.28.0"
+    "resend": "^6.28.0",
+    "stripe": "^22.6.2"
   },
   "devDependencies": {
     "jest": "^30.5.1",
